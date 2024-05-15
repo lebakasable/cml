@@ -16,6 +16,7 @@ float train[][3] = {
 };
 #define train_count (sizeof(train)/sizeof(train[0]))
 
+// https://en.wikipedia.org/wiki/Loss_function
 float cost(float w1, float w2, float b)
 {
   float result = 0.0f;
