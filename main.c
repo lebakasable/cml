@@ -3,11 +3,13 @@
 #include <math.h>
 #include <time.h>
 
+// https://en.wikipedia.org/wiki/Sigmoid_function
 float sigmoidf(float x)
 {
   return 1/(1 + expf(-x));
 }
 
+// https://en.wikipedia.org/wiki/OR_gate
 float train[][3] = {
   {0, 0, 0},
   {1, 0, 0},
