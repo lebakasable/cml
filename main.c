@@ -1,210 +1,181 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
 #include <time.h>
 
+#define NEUN_IMPLEMENTATION
+#include "neun.h"
+
 typedef struct {
-  float or_w1;
-  float or_w2;
-  float or_b;
-  float nand_w1;
-  float nand_w2;
-  float nand_b;
-  float and_w1;
-  float and_w2;
-  float and_b;
+  Mat a0, a1, a2;
+  Mat w1, b1;
+  Mat w2, b2;
 } Model;
 
-// https://en.wikipedia.org/wiki/Sigmoid_function
-float sigmoidf(float x)
-{
-  return 1/(1 + expf(-x));
-}
-
-float forward(Model m, float x1, float x2)
-{
-  float a = sigmoidf(m.or_w1*x1 + m.or_w2*x2 + m.or_b);
-  float b = sigmoidf(m.nand_w1*x1 + m.nand_w2*x2 + m.nand_b);
-  return sigmoidf(a*m.and_w1 + b*m.and_w2 + m.and_b);
-}
-
-typedef float sample[3];
-
-// https://en.wikipedia.org/wiki/OR_gate
-sample or_data[] = {
-  {0, 0, 0},
-  {1, 0, 1},
-  {0, 1, 1},
-  {1, 1, 1},
-};
-
-// https://en.wikipedia.org/wiki/NOR_gate
-sample nor_data[] = {
-  {0, 0, 1},
-  {1, 0, 0},
-  {0, 1, 0},
-  {1, 1, 0},
-};
-
-// https://en.wikipedia.org/wiki/XOR_gate
-sample xor_data[] = {
-  {0, 0, 0},
-  {1, 0, 1},
-  {0, 1, 1},
-  {1, 1, 0},
-};
-
-// https://en.wikipedia.org/wiki/AND_gate
-sample and_data[] = {
-  {0, 0, 0},
-  {1, 0, 0},
-  {0, 1, 0},
-  {1, 1, 1},
-};
-
-// https://en.wikipedia.org/wiki/NAND_gate
-sample nand_data[] = {
-  {0, 0, 1},
-  {1, 0, 1},
-  {0, 1, 1},
-  {1, 1, 0},
-};
-
-sample *data = xor_data;
-size_t data_count = 4;
-
-// https://en.wikipedia.org/wiki/Loss_function
-float cost(Model m)
-{
-  float result = 0.0f;
-  for (size_t i = 0; i < data_count; ++i) {
-    float x1 = data[i][0];
-    float x2 = data[i][1];
-    float y = forward(m, x1, x2);
-    float d = y - data[i][2];
-    result += d*d;
-  }
-  return result/data_count;
-}
-
-float rand_float(void)
-{
-  return (float)rand()/(float)RAND_MAX;
-}
-
-Model rand_model(void)
+Model model_alloc(void)
 {
   return (Model) {
-    .or_w1 = rand_float(),
-    .or_w2 = rand_float(),
-    .or_b = rand_float(),
-    .nand_w1 = rand_float(),
-    .nand_w2 = rand_float(),
-    .nand_b = rand_float(),
-    .and_w1 = rand_float(),
-    .and_w2 = rand_float(),
-    .and_b = rand_float(),
+    .a0 = mat_alloc(1, 2),
+    .w1 = mat_alloc(2, 2),
+    .b1 = mat_alloc(1, 2),
+    .a1 = mat_alloc(1, 2),
+    .w2 = mat_alloc(2, 1),
+    .b2 = mat_alloc(1, 1),
+    .a2 = mat_alloc(1, 1),
   };
 }
 
-void print_model(Model m)
+void forward(Model m)
 {
-  printf("or_w1 = %f\n", m.or_w1);
-  printf("or_w2 = %f\n", m.or_w2);
-  printf("or_b = %f\n", m.or_b);
-  printf("nand_w1 = %f\n", m.nand_w1);
-  printf("nand_w2 = %f\n", m.nand_w2);
-  printf("nand_b = %f\n", m.nand_b);
-  printf("and_w1 = %f\n", m.and_w1);
-  printf("and_w2 = %f\n", m.and_w2);
-  printf("and_b = %f\n", m.and_b);
+  mat_dot(m.a1, m.a0, m.w1);
+  mat_sum(m.a1, m.b1);
+  mat_sig(m.a1);
+
+  mat_dot(m.a2, m.a1, m.w2);
+  mat_sum(m.a2, m.b2);
+  mat_sig(m.a2);
 }
 
-Model finite_diff(Model m, float eps)
+float cost(Model m, Mat ti, Mat to)
 {
-  Model g;
-  float c = cost(m);
+  assert(ti.rows == to.rows);
+  assert(to.cols == m.a2.cols);
+  size_t n = ti.rows;
+
+  float c = 0.0f;
+  for (size_t i = 0; i < n; ++i) {
+    Mat x = mat_row(ti, i);
+    Mat y = mat_row(to, i);
+
+    mat_copy(m.a0, x);
+    forward(m);
+
+    size_t q = to.cols;
+    for (size_t j = 0; j < q; ++j) {
+      float d = MAT_AT(m.a2, 0, j) - MAT_AT(y, 0, j);
+      c += d*d;
+    }
+  }
+
+  return c/n;
+}
+
+void finite_diff(Model m, Model g, float eps, Mat ti, Mat to)
+{
   float saved;
+  float c = cost(m, ti, to);
 
-  saved = m.or_w1;
-  m.or_w1 += eps;
-  g.or_w1 = (cost(m) - c)/eps;
-  m.or_w1 = saved;
+  for (size_t i = 0; i < m.w1.rows; ++i) {
+    for (size_t j = 0; j < m.w1.cols; ++j) {
+      saved = MAT_AT(m.w1, i, j);
+      MAT_AT(m.w1, i, j) += eps;
+      MAT_AT(g.w1, i, j) = (cost(m, ti, to) - c)/eps;
+      MAT_AT(m.w1, i, j) = saved;
+    }
+  }
 
-  saved = m.or_w2;
-  m.or_w2 += eps;
-  g.or_w2 = (cost(m) - c)/eps;
-  m.or_w2 = saved;
+  for (size_t i = 0; i < m.b1.rows; ++i) {
+    for (size_t j = 0; j < m.b1.cols; ++j) {
+      saved = MAT_AT(m.b1, i, j);
+      MAT_AT(m.b1, i, j) += eps;
+      MAT_AT(g.b1, i, j) = (cost(m, ti, to) - c)/eps;
+      MAT_AT(m.b1, i, j) = saved;
+    }
+  }
 
-  saved = m.or_b;
-  m.or_b += eps;
-  g.or_b = (cost(m) - c)/eps;
-  m.or_b = saved;
+  for (size_t i = 0; i < m.w2.rows; ++i) {
+    for (size_t j = 0; j < m.w2.cols; ++j) {
+      saved = MAT_AT(m.w2, i, j);
+      MAT_AT(m.w2, i, j) += eps;
+      MAT_AT(g.w2, i, j) = (cost(m, ti, to) - c)/eps;
+      MAT_AT(m.w2, i, j) = saved;
+    }
+  }
 
-  saved = m.nand_w1;
-  m.nand_w1 += eps;
-  g.nand_w1 = (cost(m) - c)/eps;
-  m.nand_w1 = saved;
-
-  saved = m.nand_w2;
-  m.nand_w2 += eps;
-  g.nand_w2 = (cost(m) - c)/eps;
-  m.nand_w2 = saved;
-
-  saved = m.nand_b;
-  m.nand_b += eps;
-  g.nand_b = (cost(m) - c)/eps;
-  m.nand_b = saved;
-
-  saved = m.and_w1;
-  m.and_w1 += eps;
-  g.and_w1 = (cost(m) - c)/eps;
-  m.and_w1 = saved;
-
-  saved = m.and_w2;
-  m.and_w2 += eps;
-  g.and_w2 = (cost(m) - c)/eps;
-  m.and_w2 = saved;
-
-  saved = m.and_b;
-  m.and_b += eps;
-  g.and_b = (cost(m) - c)/eps;
-  m.and_b = saved;
-
-  return g;
+  for (size_t i = 0; i < m.b2.rows; ++i) {
+    for (size_t j = 0; j < m.b2.cols; ++j) {
+      saved = MAT_AT(m.b2, i, j);
+      MAT_AT(m.b2, i, j) += eps;
+      MAT_AT(g.b2, i, j) = (cost(m, ti, to) - c)/eps;
+      MAT_AT(m.b2, i, j) = saved;
+    }
+  }
 }
 
-Model train(Model m, Model g, float rate)
+void learn(Model m, Model g, float rate)
 {
-  m.or_w1 -= rate*g.or_w1;
-  m.or_w2 -= rate*g.or_w2;
-  m.or_b -= rate*g.or_b;
-  m.nand_w1 -= rate*g.nand_w1;
-  m.nand_w2 -= rate*g.nand_w2;
-  m.nand_b -= rate*g.nand_b;
-  m.and_w1 -= rate*g.and_w1;
-  m.and_w2 -= rate*g.and_w2;
-  m.and_b -= rate*g.and_b;
-  return m;
+  for (size_t i = 0; i < m.w1.rows; ++i) {
+    for (size_t j = 0; j < m.w1.cols; ++j) {
+      MAT_AT(m.w1, i, j) -= rate*MAT_AT(g.w1, i, j);
+    }
+  }
+
+  for (size_t i = 0; i < m.b1.rows; ++i) {
+    for (size_t j = 0; j < m.b1.cols; ++j) {
+      MAT_AT(m.b1, i, j) -= rate*MAT_AT(g.b1, i, j);
+    }
+  }
+
+  for (size_t i = 0; i < m.w2.rows; ++i) {
+    for (size_t j = 0; j < m.w2.cols; ++j) {
+      MAT_AT(m.w2, i, j) -= rate*MAT_AT(g.w2, i, j);
+    }
+  }
+
+  for (size_t i = 0; i < m.b2.rows; ++i) {
+    for (size_t j = 0; j < m.b2.cols; ++j) {
+      MAT_AT(m.b2, i, j) -= rate*MAT_AT(g.b2, i, j);
+    }
+  }
 }
+
+float td[] = {
+  0, 0, 0,
+  0, 1, 1,
+  1, 0, 1,
+  1, 1, 0,
+};
 
 int main(void)
 {
   srand(time(NULL));
-  
-  Model m = rand_model();
+
+  size_t stride = 3;
+  size_t n = sizeof(td)/sizeof(td[0])/stride;
+
+  Mat ti = {
+    .rows = n,
+    .cols = 2,
+    .stride = stride,
+    .es = td,
+  };
+
+  Mat to = {
+    .rows = n,
+    .cols = 1,
+    .stride = stride,
+    .es = td + 2,
+  };
+
+  Model m = model_alloc();
+  Model g = model_alloc();
+
+  mat_rand(m.w1, 0, 1);
+  mat_rand(m.b1, 0, 1);
+  mat_rand(m.w2, 0, 1);
+  mat_rand(m.b2, 0, 1);
 
   float eps = 1e-1;
   float rate = 1e-1;
 
   for (size_t i = 0; i < 100000; ++i) {
-    Model g = finite_diff(m, eps);
-    m = train(m, g, rate);
+    finite_diff(m, g, eps, ti, to);
+    learn(m, g, rate);
   }
 
   for (size_t i = 0; i < 2; ++i) {
     for (size_t j = 0; j < 2; ++j) {
-      printf("%zu | %zu = %f\n", i, j, forward(m, i, j));
+      MAT_AT(m.a0, 0, 0) = i;
+      MAT_AT(m.a0, 0, 1) = j;
+      forward(m);
+      printf("%zu ^ %zu = %f\n", i, j, *m.a2.es);
     }
   }
 
