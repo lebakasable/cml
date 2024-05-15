@@ -3,3 +3,6 @@ LIBS=-lm
 
 build: main.c
 	$(CC) $(CFLAGS) -o main main.c $(LIBS)
+
+run: build
+	./main
