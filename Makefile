@@ -1,5 +1,6 @@
-CFLAGS=-Wall -Wextra -std=c11 -pedantic
-LIBS=-lm
+CC=clang
+CFLAGS=-Wall -Wextra
+LIBS=-lm -lraylib -pthread
 
 build: main.c
 	$(CC) $(CFLAGS) -o main main.c $(LIBS)
