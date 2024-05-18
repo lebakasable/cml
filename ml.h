@@ -35,6 +35,7 @@ void mat_dot(Mat dst, Mat a, Mat b);
 void mat_sig(Mat m);
 void mat_print(Mat m, const char *name, size_t pad);
 
+// https://en.wikipedia.org/wiki/Machine_learning
 typedef struct {
   size_t len;
   Mat *ws;
@@ -43,11 +44,13 @@ typedef struct {
 } Model;
 
 Model model_alloc(size_t *desc, size_t desc_len);
+void model_zero(Model m);
 void model_rand(Model m, float low, float high);
 void model_print(Model m, const char *name);
 void model_forward(Model m);
 float model_cost(Model m, Mat ti, Mat to);
 void model_fdiff(Model m, Model g, float eps, Mat ti, Mat to);
+void model_backprop(Model m, Model g, Mat ti, Mat to);
 void model_learn(Model m, Model g, float rate);
 
 #endif // ML_H_
@@ -200,6 +203,16 @@ Model model_alloc(size_t *desc, size_t desc_len)
   return m;
 }
 
+void model_zero(Model m)
+{
+  for (size_t i = 0; i < m.len; ++i) {
+    mat_fill(m.ws[i], 0);
+    mat_fill(m.bs[i], 0);
+    mat_fill(m.as[i], 0);
+  }
+  mat_fill(m.as[m.len], 0);
+}
+
 void model_rand(Model m, float low, float high)
 {
   for (size_t i = 0; i < m.len; ++i) {
@@ -255,6 +268,7 @@ float model_cost(Model m, Mat ti, Mat to)
   return c/n;
 }
 
+// https://en.wikipedia.org/wiki/Finite_difference
 void model_fdiff(Model m, Model g, float eps, Mat ti, Mat to)
 {
   float saved;
@@ -275,6 +289,56 @@ void model_fdiff(Model m, Model g, float eps, Mat ti, Mat to)
         MAT_AT(m.bs[i], j, k) += eps;
         MAT_AT(g.bs[i], j, k) = (model_cost(m, ti, to) - c)/eps;
         MAT_AT(m.bs[i], j, k) = saved;
+      }
+    }
+  }
+}
+
+// https://en.wikipedia.org/wiki/Backpropagation
+void model_backprop(Model m, Model g, Mat ti, Mat to)
+{
+  ML_ASSERT(ti.rows == to.rows);
+  size_t n = ti.rows;
+  ML_ASSERT(MODEL_OUT(m).cols == to.cols);
+
+  model_zero(g);
+
+  for (size_t i = 0; i < n; ++i) {
+    mat_copy(MODEL_IN(m), mat_row(ti, i));
+    model_forward(m);
+
+		for (size_t j = 0; j <= m.len; ++j) {
+  		mat_fill(g.as[j], 0);
+		}
+
+    for (size_t j = 0; j < to.cols; ++j) {
+      MAT_AT(MODEL_OUT(g), 0, j) = MAT_AT(MODEL_OUT(m), 0, j) - MAT_AT(to, i, j);
+    }
+
+    for (size_t l = m.len; l > 0; --l) {
+      for (size_t j = 0; j < m.as[l].cols; ++j) {
+        float a = MAT_AT(m.as[l], 0, j);
+        float da = MAT_AT(g.as[l], 0, j);
+        MAT_AT(g.bs[l - 1], 0, j) += 2*da*a*(1 - a);
+        for (size_t k = 0; k < m.as[l - 1].cols; ++k) {
+          float pa = MAT_AT(m.as[l - 1], 0, k);
+          float w = MAT_AT(m.ws[l - 1], k, j);
+          MAT_AT(g.ws[l - 1], k, j) += 2*da*a*(1 - a)*pa;
+          MAT_AT(g.as[l - 1], 0, k) += 2*da*a*(1 - a)*w;
+        }
+      }
+    }
+  }
+
+  for (size_t i = 0; i < g.len; ++i) {
+    for (size_t j = 0; j < g.ws[i].rows; ++j) {
+      for (size_t k = 0; k < g.ws[i].cols; ++k) {
+        MAT_AT(g.ws[i], j, k) /= n;
+      }
+    }
+    for (size_t j = 0; j < g.bs[i].rows; ++j) {
+      for (size_t k = 0; k < g.bs[i].cols; ++k) {
+        MAT_AT(g.bs[i], j, k) /= n;
       }
     }
   }

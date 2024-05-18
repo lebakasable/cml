@@ -3,6 +3,14 @@
 #define ML_IMPLEMENTATION
 #include "ml.h"
 
+// https://en.wikipedia.org/wiki/Adder_(electronics)
+float td_sum[] = {
+  0, 0, 0, 0, 0, 0,
+  0, 0, 0, 1, 0, 1,
+  0, 1, 0, 1, 0, 1,
+  0, 1, 1, 0, 1, 1,
+};
+
 // https://en.wikipedia.org/wiki/XOR_gate
 float td_xor[] = {
   0, 0, 0,
@@ -47,11 +55,15 @@ int main(void)
   Model g = model_alloc(desc, ML_ARRAY_LEN(desc));
   model_rand(m, 0, 1);
 
-  float eps = 1e-1;
-  float rate = 1e-1;
+  float rate = 1;
 
   for (size_t i = 0; i < 100000; ++i) {
+#if 0
+    float eps = 1e-1;
     model_fdiff(m, g, eps, ti, to);
+#else
+    model_backprop(m, g, ti, to);
+#endif
     model_learn(m, g, rate);
   }
 
